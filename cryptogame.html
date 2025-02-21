@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CryptoGame</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.2/dist/echarts.min.js"></script>
+    <style>
+
+        .container {
+            display: flex;
+            gap: 20px;
+        }
+        #kline-chart {
+            width: 1000px;
+            height: 600px;
+        }
+        #event-display {
+            width: 1000px;
+            margin-top: 10px;
+            min-height: 30px;
+            padding: 5px;
+            background-color: #f5f5f5;
+            border-radius: 4px;
+            overflow-y: auto;
+            max-height: 100px;
+        }
+        #trading-panel {
+            width: 300px;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .trading-info {
+            margin-bottom: 15px;
+        }
+        .trading-info div {
+            margin: 5px 0;
+            font-size: 14px;
+        }
+        .trading-buttons {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+        button {
+            padding: 8px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: 0.3s;
+        }
+        .long-btn {
+            background-color: #4CAF50;
+            color: white;
+        }
+        .short-btn {
+            background-color: #f44336;
+            color: white;
+        }
+        .close-btn {
+            background-color: #666;
+            color: white;
+        }
+        .event-item {
+            padding: 5px;
+            margin: 3px 0;
+            border-radius: 3px;
+            font-size: 12px;
+            animation: fadeOut 9.5s forwards;
+        }
+        @keyframes fadeOut {
+            from { opacity: 1; }
+            to { opacity: 0; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div>
+        <div id="kline-chart"></div>
+        <div id="event-display"></div>
+    </div>
+     <div id="trading-panel">
+        <div class="trading-info">
+            <div>当前价格：<span id="current-price">100.00</span> USD</div>
+            <div>权益金：$<span id="equity">10000.00</span></div>
+            <div>多仓成本：<span id="long-cost">-</span></div>
+            <div>空仓成本：<span id="short-cost">-</span></div>
+            <div>已实现盈亏：$<span id="realized-pnl">0.00</span></div>
+            <div>未实现盈亏：$<span id="unrealized-pnl">0.00</span></div>
+        </div>
+        <div class="trading-buttons">
+            <button class="long-btn" onclick="trade('LONG', 10)">做多10%</button>
+            <button class="short-btn" onclick="trade('SHORT', 10)">做空10%</button>
+            <button class="long-btn" onclick="trade('LONG', 100)">做多100%</button>
+            <button class="short-btn" onclick="trade('SHORT', 100)">做空100%</button>
+             <button class="close-btn" onclick="closePosition('LONG')">平多ALL</button>
+            <button class="close-btn" onclick="closePosition('SHORT')">平空ALL</button>
+        </div>
+        <button class="restart-btn" onclick="restartGame()">重新开始游戏</button>
+        </div>
+     
+    <script>
+        const myChart = echarts.init(document.getElementById('kline-chart'));
+        // 交易状态
+        let tradingState = {
+            equity: 10000,
+            leverage: 10,
+            longPosition: { amount: 0, costPrice: 0 },
+            shortPosition: { amount: 0, costPrice: 0 },
+            realizedPNL: 0
+        };
+          // 游戏状态
+        let gameState = {
+            isGameOver: false
+        };
+        // 更新交易信息显示
+         // 重新开始游戏
+        function restartGame() {
+            tradingState = {
+                equity: 10000,
+                leverage: 10,
+                longPosition: { amount: 0, costPrice: 0 },
+                shortPosition: { amount: 0, costPrice: 0 },
+                realizedPNL: 0
+            };
+            gameState.isGameOver = false;
+            updateTradingInfo();
+            updateChartMarkLine();
+        }
+        function updateTradingInfo() {
+            document.getElementById('current-price').textContent = currentPrice.toFixed(2);
+            document.getElementById('equity').textContent = tradingState.equity.toFixed(2);
+            document.getElementById('long-cost').textContent = tradingState.longPosition.amount > 0 ? 
+                tradingState.longPosition.costPrice.toFixed(2) : '-';
+            document.getElementById('short-cost').textContent = tradingState.shortPosition.amount > 0 ? 
+                tradingState.shortPosition.costPrice.toFixed(2) : '-';
+            document.getElementById('realized-pnl').textContent = tradingState.realizedPNL.toFixed(2);
+            
+            // 计算未实现盈亏
+            const longPNL = tradingState.longPosition.amount * (currentPrice - tradingState.longPosition.costPrice);
+            const shortPNL = tradingState.shortPosition.amount * (tradingState.shortPosition.costPrice - currentPrice);
+            document.getElementById('unrealized-pnl').textContent = (longPNL + shortPNL).toFixed(2);
+        }
+
+        // 交易逻辑
+        function trade(direction, percentage) {
+            const maxPositionValue = tradingState.equity * tradingState.leverage;
+            const positionValue = maxPositionValue * (percentage / 100);
+            const amount = positionValue / currentPrice;
+
+            if (direction === 'LONG') {
+                if (tradingState.longPosition.amount === 0) {
+                    tradingState.longPosition.costPrice = currentPrice;
+                } else {
+                    // 计算平均成本
+                    const totalAmount = tradingState.longPosition.amount + amount;
+                    tradingState.longPosition.costPrice = 
+                        (tradingState.longPosition.costPrice * tradingState.longPosition.amount + 
+                         currentPrice * amount) / totalAmount;
+                }
+                tradingState.longPosition.amount += amount;
+            } else {
+                if (tradingState.shortPosition.amount === 0) {
+                    tradingState.shortPosition.costPrice = currentPrice;
+                } else {
+                    const totalAmount = tradingState.shortPosition.amount + amount;
+                    tradingState.shortPosition.costPrice = 
+                        (tradingState.shortPosition.costPrice * tradingState.shortPosition.amount + 
+                         currentPrice * amount) / totalAmount;
+                }
+                tradingState.shortPosition.amount += amount;
+            }
+            updateChartMarkLine();
+            updateTradingInfo();
+        }
+
+        // 平仓逻辑
+        function closePosition(direction) {
+            if (direction === 'LONG' && tradingState.longPosition.amount > 0) {
+                const pnl = tradingState.longPosition.amount * (currentPrice - tradingState.longPosition.costPrice);
+                tradingState.realizedPNL += pnl;
+                tradingState.equity += pnl;
+                tradingState.longPosition = { amount: 0, costPrice: 0 };
+            } else if (direction === 'SHORT' && tradingState.shortPosition.amount > 0) {
+                const pnl = tradingState.shortPosition.amount * (tradingState.shortPosition.costPrice - currentPrice);
+                tradingState.realizedPNL += pnl;
+                tradingState.equity += pnl;
+                tradingState.shortPosition = { amount: 0, costPrice: 0 };
+            }
+            updateChartMarkLine();
+            updateTradingInfo();
+        }
+
+        // 更新图表标记线
+        function updateChartMarkLine() {
+            const markLineData = [];
+            if (tradingState.longPosition.amount > 0) {
+                markLineData.push({
+                    yAxis: tradingState.longPosition.costPrice,
+                    lineStyle: { type: 'dashed', color: '#9c27b0' }
+                });
+            }
+            if (tradingState.shortPosition.amount > 0) {
+                markLineData.push({
+                    yAxis: tradingState.shortPosition.costPrice,
+                    lineStyle: { type: 'dashed', color: '#9c27b0' }
+                });
+            }
+
+            myChart.setOption({
+                series: [{
+                    markLine: {
+                        data: markLineData,
+                        symbol: 'none',
+                        lineStyle: { width: 2 }
+                    }
+                }]
+            });
+        }
+
+        // 强制平仓检查
+        function checkLiquidation() {
+            const totalEquity = tradingState.equity + parseFloat(document.getElementById('unrealized-pnl').textContent);
+            const maintenanceMargin = 0.1; // 10%维持保证金
+
+            if (totalEquity <= tradingState.equity * maintenanceMargin) {
+                if (tradingState.longPosition.amount > 0) closePosition('LONG');
+                if (tradingState.shortPosition.amount > 0) closePosition('SHORT');
+                gameState.isGameOver = true;
+                if (confirm('强制平仓！保证金不足。是否重新开始游戏？')) {
+                    restartGame();
+                }
+            }
+        }
+        // 宏观事件配置
+        const macroEvents = [
+            { 
+                name: "FED宣布降息",
+                type: "positive",
+                impact: 0.10,
+                used: false
+            },
+            {
+                name: "该项目ETF获批",
+                type: "positive",
+                impact: 0.20,
+                used: false
+            },
+            {
+                name: "特朗普宣布该货币为美国法定货币",
+                type: "positive",
+                impact: 0.50,
+                used: false
+            },
+            {
+                name: "特朗普宣布建立该货币的国家储备",
+                type: "positive",
+                impact: 0.80,
+                used: false
+            },
+            {
+                name: "美国政府正在购买该货币",
+                type: "positive",
+                impact: 0.50,
+                used: false
+            },
+            {
+                name: "FED宣布加息",
+                type: "negative",
+                impact: -0.10,
+                used: false
+            },
+            {
+                name: "该项目方跑路",
+                type: "negative",
+                impact: -0.50,
+                used: false
+            },
+            {
+                name: "CNZF关闭交易所",
+                type: "negative",
+                impact: -0.20,
+                used: false
+            },
+            {
+                name: "美国政府购买该货币为谣言",
+                type: "negative",
+                impact: -0.50,
+                used: false
+            }
+        ];
+
+        // 状态变量
+        let currentPrice = 100;
+        let currentTrend = 'sideways';
+        let trendDuration = Math.floor(Math.random() * 10) + 5;
+        let trendCounter = 0;
+        let kLineData = [];
+        let xAxisData = [];
+        let counter = 0;
+        let isProcessingEvent = false; // 新增事件处理锁
+
+        // 价格保护函数
+        function applyPriceImpact(impact) {
+            const newPrice = currentPrice * (1 + impact);
+            currentPrice = Math.max(newPrice, 0.01);
+            return currentPrice;
+        }
+
+        // 事件处理函数
+        function handleMacroEvent() {
+            if (isProcessingEvent) return;
+            isProcessingEvent = true;
+
+            if (Math.random() < 0.01) {
+                const availableEvents = macroEvents.filter(event => !event.used);
+                if (availableEvents.length === 0) return;
+
+                const randomIndex = Math.floor(Math.random() * availableEvents.length);
+                const selectedEvent = availableEvents[randomIndex];
+                selectedEvent.used = true;
+
+                // 生成事件K线
+                const prevClose = currentPrice; // 前一根K线的收盘价
+                const close = applyPriceImpact(selectedEvent.impact);
+                const open = prevClose; // 强制开盘价等于前收盘
+                const high = Math.max(open, close) + Math.random();
+                const low = Math.max(0.01, Math.min(open, close) - Math.random());
+
+                // 插入数据
+                kLineData.push([open, close, low, high]);
+                xAxisData.push(counter++);
+
+                // 保持数据长度
+                if (kLineData.length > 100) {
+                    kLineData.shift();
+                    xAxisData.shift();
+                }
+
+                // 立即更新图表
+                myChart.setOption({
+                    xAxis: { data: xAxisData },
+                    series: [{ data: kLineData }]
+                });
+
+                // 显示事件
+                const eventItem = document.createElement('div');
+                eventItem.className = `event-item ${selectedEvent.type}`;
+                eventItem.innerHTML = `
+                    [${new Date().toLocaleTimeString()}] 
+                    <strong>${selectedEvent.name}</strong>
+                    <span style="float:right;color:${selectedEvent.type === 'positive' ? '#4CAF50' : '#f44336'}">
+                        ${selectedEvent.impact > 0 ? '+' : ''}${(selectedEvent.impact * 100).toFixed(0)}%
+                    </span>
+                `;
+                document.getElementById('event-display').prepend(eventItem);
+                setTimeout(() => eventItem.remove(), 10000);
+            }
+            isProcessingEvent = false;
+        }
+
+        // 生成K线逻辑
+        function generateSingleKLine() {
+            const open = currentPrice; // 开盘价始终等于前收盘
+            
+            // 5%的概率触发随机波动
+            if (Math.random() < 0.05) {
+                const randomImpact = (Math.random() * 0.4) - 0.2; // -20%到20%的波动
+                currentPrice = applyPriceImpact(randomImpact);
+                console.log("触发了"+randomImpact+"%");
+            }
+
+            if (trendCounter >= trendDuration) {
+                currentTrend = ['bull', 'bear', 'sideways'].filter(t => t !== currentTrend)[Math.floor(Math.random() * 2)];
+                trendDuration = Math.floor(Math.random() * 10) + 5;
+                trendCounter = 0;
+            }
+
+            let close, high, low;
+
+            if (currentTrend === 'bull') {
+                const priceChange = Math.random() * 2 + 1;
+                close = Math.random() < 0.8 ? open + priceChange : open - priceChange;
+            } else if (currentTrend === 'bear') {
+                const priceChange = Math.random() * 2 + 1;
+                close = Math.random() < 0.8 ? open - priceChange : open + priceChange;
+            } else {
+                close = open + (Math.random() * 2 - 1);
+            }
+
+            // 价格保护
+            close = Math.max(close, 0.01);
+            high = Math.max(Math.max(open, close) + Math.random(), 0.01);
+            low = Math.max(Math.min(open, close) - Math.random(), 0.01);
+
+            currentPrice = close;
+            trendCounter++;
+
+            return [open, close, low, high];
+        }
+
+        // ECharts配置
+        const option = {
+            tooltip: {
+                trigger: 'axis',
+                axisPointer: { type: 'cross' }
+            },
+            xAxis: {
+                show: false, // 隐藏整个x轴
+                type: 'category',
+                data: xAxisData,
+                boundaryGap: false
+            },
+            yAxis: { scale: true },
+            series: [{
+                name: 'K 线',
+                type: 'candlestick',
+                data: kLineData,
+                barWidth: '60%',
+                itemStyle: {
+                    color: '#00ff00',
+                    color0: '#ff0000',
+                    borderColor: '#00ff00',
+                    borderColor0: '#ff0000'
+                },
+                 markLine: {
+                    data: [],
+                    symbol: 'none'
+                }
+            }]
+        };
+
+        // 初始化数据
+        for (let i = 0; i < 1; i++) {
+            let kLine = generateSingleKLine();
+            kLineData.push(kLine);
+            xAxisData.push(counter++);
+        }
+        myChart.setOption(option);
+
+        // K线更新定时器（1秒间隔）
+        setInterval(() => {
+            let kLine = generateSingleKLine();
+            kLineData.push(kLine);
+            xAxisData.push(counter++);
+
+            if (kLineData.length > 100) {
+                kLineData.shift();
+                xAxisData.shift();
+            }
+
+            myChart.setOption({
+                xAxis: { data: xAxisData },
+                series: [{ data: kLineData }]
+            });
+            updateTradingInfo();
+            checkLiquidation();
+        }, 1000);
+
+        // 宏观事件检查定时器（10秒间隔）
+        setInterval(handleMacroEvent, 10000);
+    </script>
+</div>
+</body>
+</html>
